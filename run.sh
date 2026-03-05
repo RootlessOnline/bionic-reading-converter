@@ -1,6 +1,13 @@
 #!/bin/bash
-echo "Installing Python dependencies..."
-pip install -r requirements.txt
+
+# Check if venv exists, if not run setup
+if [ ! -d "venv" ]; then
+    echo "Virtual environment not found. Running setup first..."
+    ./setup.sh
+fi
+
+# Activate virtual environment
+source venv/bin/activate
 
 echo ""
 echo "=========================================="
