@@ -113,43 +113,8 @@ class PDFProcessor:
 
         return document
 
-    def transform_pdf(self, document: PDFDocument) -> PDFDocument:
-        """Apply bionic reading transformation to document text."""
-        self.report_progress("transformation", 0, "Starting bionic transformation...")
-
-        bionic_config = BionicConfig(
-            emphasis_ratio=self.config.emphasis_ratio,
-            min_word_length=self.config.min_word_length,
-            skip_short_words=self.config.skip_short_words,
-            bold_intensity=self.config.bold_intensity,
-            preserve_formatting=True
-        )
-
-        reader = BionicReader(bionic_config)
-        total_blocks = sum(len(page.text_blocks) for page in document.pages)
-        processed_blocks = 0
-
-        for page_idx, page in enumerate(document.pages):
-            for block in page.text_blocks:
-                # Transform the text in place
-                block.text = reader.transform(block.text)
-                processed_blocks += 1
-
-                # Report progress every 10% or every 100 blocks
-                if processed_blocks % max(1, total_blocks // 10) == 0:
-                    progress = (processed_blocks / total_blocks) * 100
-                    self.report_progress(
-                        "transformation",
-                        progress,
-                        f"Transformed {processed_blocks}/{total_blocks} text blocks"
-                    )
-
-        self.report_progress("transformation", 100, "Bionic transformation complete")
-
-        return document
-
     def generate_pdf(self, document: PDFDocument) -> str:
-        """Generate enhanced PDF from transformed document."""
+        """Generate enhanced PDF with bionic reading."""
         self.report_progress("generation", 0, "Starting PDF generation...")
 
         # Create output directory if needed
@@ -160,12 +125,14 @@ class PDFProcessor:
         bionic_config = BionicConfig(
             emphasis_ratio=self.config.emphasis_ratio,
             min_word_length=self.config.min_word_length,
-            bold_intensity=self.config.bold_intensity
+            skip_short_words=self.config.skip_short_words,
+            bold_intensity=self.config.bold_intensity,
+            preserve_formatting=True
         )
 
         generator_config = GeneratorConfig(
             output_path=self.config.output_path,
-            apply_bionic=False,  # Already transformed
+            apply_bionic=True,  # Enable bionic transformation in generator
             bionic_config=bionic_config,
             preserve_layout=self.config.preserve_layout
         )
@@ -221,10 +188,7 @@ class PDFProcessor:
                 "estimated_words": total_words
             }
 
-            # Transform
-            document = self.transform_pdf(document)
-
-            # Generate
+            # Generate (with bionic transformation)
             output_path = self.generate_pdf(document)
 
             result["success"] = True
@@ -337,7 +301,6 @@ def main():
     processor = PDFProcessor(config)
 
     if not args.json:
-        # Set up progress callback for human-readable output
         def progress_callback(progress: ProcessingProgress):
             elapsed = progress.timestamp - processor.start_time
             print(f"[{elapsed:.1f}s] {progress.stage}: {progress.progress:.0f}% - {progress.message}")
@@ -351,17 +314,17 @@ def main():
             print(json.dumps(result))
         else:
             if result["success"]:
-                print(f"\nSuccess! Output saved to: {result['output_path']}")
-                print(f"Statistics: {result['statistics']}")
+                print(f"\n✅ Success! Output saved to: {result['output_path']}")
+                print(f"📊 Statistics: {result['statistics']}")
             else:
-                print(f"\nError: {result['error']}")
+                print(f"\n❌ Error: {result['error']}")
                 sys.exit(1)
 
     except Exception as e:
         if args.json:
             print(json.dumps({"success": False, "error": str(e)}))
         else:
-            print(f"\nFatal error: {e}")
+            print(f"\n❌ Fatal error: {e}")
             sys.exit(1)
 
 

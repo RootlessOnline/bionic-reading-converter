@@ -26,15 +26,12 @@ from bionic_reader import BionicReader, BionicConfig
 
 # Font paths
 FONT_PATHS = {
+    'normal': '/usr/share/fonts/truetype/english/calibri-regular.ttf',
+    'bold': '/usr/share/fonts/truetype/english/calibri-bold.ttf',
+    'italic': '/usr/share/fonts/truetype/english/calibri-italic.ttf',
     'chinese': '/usr/share/fonts/truetype/chinese/SimHei.ttf',
-    'chinese_regular': '/usr/share/fonts/truetype/chinese/SimSun.ttf',
-    'english': '/usr/share/fonts/truetype/english/Times-New-Roman.ttf',
-    'english_sans': '/usr/share/fonts/truetype/english/LiberationSans-Regular.ttf',
-    'english_mono': '/usr/share/fonts/truetype/english/LiberationMono-Regular.ttf',
-    'calibri': '/usr/share/fonts/truetype/english/calibri-regular.ttf',
-    'calibri_bold': '/usr/share/fonts/truetype/english/calibri-bold.ttf',
-    'calibri_italic': '/usr/share/fonts/truetype/english/calibri-italic.ttf',
-    'calibri_bold_italic': '/usr/share/fonts/truetype/english/calibri-bold-italic.ttf',
+    'chinese_bold': '/usr/share/fonts/truetype/chinese/SimHei.ttf',
+    'times': '/usr/share/fonts/truetype/english/Times-New-Roman.ttf',
 }
 
 
@@ -42,44 +39,51 @@ class FontManager:
     """Manage font registration and selection."""
 
     def __init__(self):
-        self.registered_fonts = set()
+        self.registered_fonts = {}
         self._register_fonts()
 
     def _register_fonts(self):
         """Register all available fonts."""
-        for name, path in FONT_PATHS.items():
-            if os.path.exists(path):
-                try:
-                    pdfmetrics.registerFont(TTFont(name, path))
-                    self.registered_fonts.add(name)
-                    print(f"Registered font: {name}")
-                except Exception as e:
-                    print(f"Warning: Could not register font {name}: {e}")
+        # Register normal font
+        if os.path.exists(FONT_PATHS.get('normal', '')):
+            try:
+                pdfmetrics.registerFont(TTFont('BionicNormal', FONT_PATHS['normal']))
+                self.registered_fonts['normal'] = 'BionicNormal'
+                print("Registered font: BionicNormal (for regular text)")
+            except Exception as e:
+                print(f"Warning: Could not register normal font: {e}")
 
-        # Register font families for bold support
-        try:
-            if 'calibri' in self.registered_fonts:
-                pdfmetrics.registerFontFamily(
-                    'calibri',
-                    normal='calibri',
-                    bold='calibri_bold',
-                    italic='calibri_italic',
-                    boldItalic='calibri_bold_italic'
-                )
-        except Exception as e:
-            print(f"Warning: Could not register font family: {e}")
+        # Register bold font
+        if os.path.exists(FONT_PATHS.get('bold', '')):
+            try:
+                pdfmetrics.registerFont(TTFont('BionicBold', FONT_PATHS['bold']))
+                self.registered_fonts['bold'] = 'BionicBold'
+                print("Registered font: BionicBold (for emphasized text)")
+            except Exception as e:
+                print(f"Warning: Could not register bold font: {e}")
 
-    def get_font(self, is_cjk: bool = False, prefer_monospace: bool = False) -> str:
-        """Get an appropriate font name."""
-        if is_cjk:
-            return 'chinese' if 'chinese' in self.registered_fonts else 'Helvetica'
-        if prefer_monospace:
-            return 'english_mono' if 'english_mono' in self.registered_fonts else 'Courier'
-        return 'calibri' if 'calibri' in self.registered_fonts else 'Helvetica'
+        # Register Chinese font
+        if os.path.exists(FONT_PATHS.get('chinese', '')):
+            try:
+                pdfmetrics.registerFont(TTFont('BionicChinese', FONT_PATHS['chinese']))
+                self.registered_fonts['chinese'] = 'BionicChinese'
+                print("Registered font: BionicChinese (for CJK text)")
+            except Exception as e:
+                print(f"Warning: Could not register Chinese font: {e}")
 
-    def is_registered(self, font_name: str) -> bool:
-        """Check if a font is registered."""
-        return font_name in self.registered_fonts
+        # Fallback to Helvetica if no fonts available
+        if 'normal' not in self.registered_fonts:
+            self.registered_fonts['normal'] = 'Helvetica'
+            self.registered_fonts['bold'] = 'Helvetica-Bold'
+            print("Using fallback: Helvetica")
+
+    def get_font(self, is_bold: bool = False, is_cjk: bool = False) -> str:
+        """Get appropriate font name."""
+        if is_cjk and 'chinese' in self.registered_fonts:
+            return self.registered_fonts['chinese']
+        if is_bold and 'bold' in self.registered_fonts:
+            return self.registered_fonts['bold']
+        return self.registered_fonts.get('normal', 'Helvetica')
 
 
 @dataclass
@@ -89,7 +93,7 @@ class GeneratorConfig:
     apply_bionic: bool = True
     bionic_config: Optional[BionicConfig] = None
     preserve_layout: bool = True
-    page_size: Tuple[float, float] = None  # Width, height
+    page_size: Tuple[float, float] = None
     margin: float = 0.5 * inch
     add_page_numbers: bool = True
     accessibility_tags: bool = True
@@ -111,23 +115,6 @@ class PDFGenerator:
             if 0x4E00 <= code <= 0x9FFF:
                 return True
         return False
-
-    def get_font_for_text(self, text: str, original_font: Optional[str] = None) -> str:
-        """Get appropriate font for text."""
-        is_cjk = self.detect_cjk(text)
-
-        if is_cjk:
-            return self.font_manager.get_font(is_cjk=True)
-
-        # Try to match original font
-        if original_font:
-            font_lower = original_font.lower()
-            if 'mono' in font_lower or 'code' in font_lower or 'courier' in font_lower:
-                return self.font_manager.get_font(prefer_monospace=True)
-            if 'sans' in font_lower or 'arial' in font_lower or 'helvetica' in font_lower:
-                return 'Helvetica'
-
-        return self.font_manager.get_font()
 
     def parse_bionic_text(self, text: str) -> List[Tuple[str, bool]]:
         """
@@ -163,34 +150,30 @@ class PDFGenerator:
         text = self.transform_text_block(block)
         segments = self.parse_bionic_text(text)
 
-        font_name = self.get_font_for_text(text, block.font_name)
         font_size = block.font_size or 12
+        is_cjk = self.detect_cjk(text)
 
         # PDF coordinates: (0,0) is bottom-left
-        # Convert from top-left to bottom-left
         x = block.x0
-        y = page_height - block.y0 - font_size * 0.8  # Adjust for baseline
+        y = page_height - block.y0 - font_size * 0.8
 
-        # Draw each segment
+        # Draw each segment with appropriate font
         current_x = x
 
         for segment_text, is_bold in segments:
             if not segment_text:
                 continue
 
-            # Set font with appropriate weight
-            if is_bold:
-                current_font = f"{font_name}-Bold" if self.font_manager.is_registered(f"{font_name}-Bold") else font_name
-                try:
-                    canvas_obj.setFont(current_font, font_size)
-                except:
-                    canvas_obj.setFont(font_name, font_size)
-            else:
-                canvas_obj.setFont(font_name, font_size)
+            # Get the right font
+            font_name = self.font_manager.get_font(is_bold=is_bold, is_cjk=is_cjk)
 
+            # Set the font
+            canvas_obj.setFont(font_name, font_size)
+
+            # Draw the text
             canvas_obj.drawString(current_x, y, segment_text)
 
-            # Calculate text width for next position
+            # Calculate width for next position
             text_width = canvas_obj.stringWidth(segment_text, font_name, font_size)
             current_x += text_width
 
@@ -203,12 +186,12 @@ class PDFGenerator:
         canvas_obj.setFont('Helvetica', 10)
         text_width = canvas_obj.stringWidth(text, 'Helvetica', 10)
         x = (page_width - text_width) / 2
-        y = 30  # 30 points from bottom
+        y = 30
 
         canvas_obj.drawString(x, y, text)
 
     def generate_simple_pdf(self, document: PDFDocument) -> str:
-        """Generate a simple PDF with text content."""
+        """Generate a simple PDF with text content preserving layout."""
         output_path = self.config.output_path
 
         # Create canvas with first page dimensions
@@ -224,7 +207,7 @@ class PDFGenerator:
             # Set page size for this page
             c.setPageSize((page.width, page.height))
 
-            # Draw text blocks
+            # Draw text blocks with bionic enhancement
             for block in page.text_blocks:
                 self.draw_text_block(c, block, page.height)
 
@@ -250,14 +233,17 @@ class PDFGenerator:
             bottomMargin=72
         )
 
-        # Create styles
+        # Create styles with our registered fonts
+        normal_font = self.font_manager.get_font(is_bold=False)
+        bold_font = self.font_manager.get_font(is_bold=True)
+
         styles = getSampleStyleSheet()
 
         # Custom styles for bionic reading
         normal_style = ParagraphStyle(
             'BionicNormal',
             parent=styles['Normal'],
-            fontName='calibri' if self.font_manager.is_registered('calibri') else 'Helvetica',
+            fontName=normal_font,
             fontSize=12,
             leading=16,
             spaceAfter=12,
@@ -267,7 +253,7 @@ class PDFGenerator:
         heading_style = ParagraphStyle(
             'BionicHeading',
             parent=styles['Heading1'],
-            fontName='calibri' if self.font_manager.is_registered('calibri') else 'Helvetica-Bold',
+            fontName=bold_font,
             fontSize=16,
             leading=20,
             spaceAfter=20,
@@ -289,6 +275,9 @@ class PDFGenerator:
                 if self.config.apply_bionic:
                     text = self.bionic_reader.transform(text)
 
+                # Convert **text** to <b>text</b> for ReportLab
+                text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+
                 # Determine if heading based on font size
                 is_heading = any(
                     block.font_size and block.font_size > 14
@@ -298,13 +287,13 @@ class PDFGenerator:
                 style = heading_style if is_heading else normal_style
 
                 try:
-                    # Create paragraph with bold tags preserved
                     para = Paragraph(text, style)
                     story.append(para)
                 except Exception as e:
                     print(f"Warning: Could not create paragraph: {e}")
-                    # Fallback to plain text
-                    story.append(Paragraph(text.replace('<', '&lt;').replace('>', '&gt;'), style))
+                    # Fallback
+                    safe_text = text.replace('<', '&lt;').replace('>', '&gt;')
+                    story.append(Paragraph(safe_text, style))
 
         doc.build(story)
         return output_path
@@ -314,7 +303,6 @@ class PDFGenerator:
         if not blocks:
             return []
 
-        # Sort by y position (top to bottom), then x position (left to right)
         sorted_blocks = sorted(blocks, key=lambda b: (b.y0, b.x0))
 
         paragraphs = []
@@ -326,15 +314,12 @@ class PDFGenerator:
             y_diff = abs(block.y0 - last_y)
             font_size = block.font_size or 12
 
-            # Same line if y difference is small
             if y_diff < last_font_size * 0.3:
                 current_para.append(block)
-            # New paragraph if significant gap
             elif y_diff > last_font_size * 1.5:
                 paragraphs.append(current_para)
                 current_para = [block]
             else:
-                # Same paragraph, new line
                 current_para.append(block)
 
             last_y = block.y0
